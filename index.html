@@ -111,7 +111,7 @@
     // OPTION 1: Google Sheets URL (publish sheet as CSV)
     // To use: In Google Sheets, go to File > Share > Publish to web > Select sheet > CSV > Publish
     // Paste the URL here. Leave empty string to disable.
-    const GOOGLE_SHEET_CSV_URL = '';
+    const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSiXnUIwQEWWr4sdhTGsXRsaKIv6wkHQ0XAiykSevpK4PfiO9hKDrWlLQx2W979cxM01JMOghTYzhNL/pub?gid=0&single=true&output=csv';
     
     // OPTION 2: Default/fallback data (used when no external source is loaded)
     // Format: { zip: "XXXXX", total: N, newCount: N, renewals: N }
@@ -550,6 +550,31 @@
       return Array.from(zipMap.values()).filter(z => z.total > 0);
     }
 
+    // CORS proxies to try (in order)
+    const CORS_PROXIES = [
+      (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+      (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    ];
+
+    async function fetchWithCorsRetry(url) {
+      // Try direct fetch first
+      try {
+        const response = await fetch(url);
+        if (response.ok) return await response.text();
+      } catch (_) {}
+
+      // Try each CORS proxy
+      for (const proxyFn of CORS_PROXIES) {
+        try {
+          const proxyUrl = proxyFn(url);
+          const response = await fetch(proxyUrl);
+          if (response.ok) return await response.text();
+        } catch (_) {}
+      }
+
+      throw new Error('Could not fetch URL (tried direct + CORS proxies)');
+    }
+
     // Load from Google Sheet
     window.loadFromGoogleSheet = async function() {
       const url = document.getElementById('sheetUrl').value.trim();
@@ -564,9 +589,7 @@
       document.getElementById('loading').classList.remove('hidden');
 
       try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const csvText = await response.text();
+        const csvText = await fetchWithCorsRetry(url);
         
         Papa.parse(csvText, {
           header: true,
@@ -641,16 +664,13 @@
       // Try Google Sheet first if configured
       if (GOOGLE_SHEET_CSV_URL) {
         try {
-          const response = await fetch(GOOGLE_SHEET_CSV_URL);
-          if (response.ok) {
-            const csvText = await response.text();
-            const results = Papa.parse(csvText, { header: true, skipEmptyLines: true });
-            if (results.data.length > 0) {
-              zipData = normalizeData(results.data);
-              state.dataSource = 'google';
-              await buildAllMarkers();
-              return;
-            }
+          const csvText = await fetchWithCorsRetry(GOOGLE_SHEET_CSV_URL);
+          const results = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+          if (results.data.length > 0) {
+            zipData = normalizeData(results.data);
+            state.dataSource = 'google';
+            await buildAllMarkers();
+            return;
           }
         } catch (_) {
           console.log('Google Sheet not available, using default data');
