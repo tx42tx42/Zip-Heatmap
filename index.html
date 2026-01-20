@@ -113,53 +113,8 @@
     // Paste the URL here. Leave empty string to disable.
     const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSiXnUIwQEWWr4sdhTGsXRsaKIv6wkHQ0XAiykSevpK4PfiO9hKDrWlLQx2W979cxM01JMOghTYzhNL/pub?gid=0&single=true&output=csv';
     
-    // OPTION 2: Default/fallback data (used when no external source is loaded)
-    // Format: { zip: "XXXXX", total: N, newCount: N, renewals: N }
-    // This data is from your ziptracking2.xlsx as of the current export
-    const DEFAULT_ZIP_DATA = [
-      { zip: "29681", total: 54, newCount: 46, renewals: 8 },
-      { zip: "29607", total: 33, newCount: 25, renewals: 8 },
-      { zip: "29680", total: 17, newCount: 13, renewals: 4 },
-      { zip: "29615", total: 17, newCount: 11, renewals: 6 },
-      { zip: "29601", total: 14, newCount: 5, renewals: 9 },
-      { zip: "29605", total: 14, newCount: 8, renewals: 6 },
-      { zip: "29609", total: 12, newCount: 6, renewals: 6 },
-      { zip: "29662", total: 12, newCount: 11, renewals: 1 },
-      { zip: "29644", total: 9, newCount: 7, renewals: 2 },
-      { zip: "29650", total: 9, newCount: 4, renewals: 5 },
-      { zip: "29651", total: 7, newCount: 4, renewals: 3 },
-      { zip: "29611", total: 5, newCount: 3, renewals: 2 },
-      { zip: "29617", total: 5, newCount: 1, renewals: 4 },
-      { zip: "29621", total: 3, newCount: 2, renewals: 1 },
-      { zip: "29642", total: 3, newCount: 0, renewals: 3 },
-      { zip: "29673", total: 3, newCount: 1, renewals: 2 },
-      { zip: "29687", total: 3, newCount: 0, renewals: 3 },
-      { zip: "29334", total: 2, newCount: 2, renewals: 0 },
-      { zip: "29365", total: 2, newCount: 1, renewals: 1 },
-      { zip: "29388", total: 2, newCount: 2, renewals: 0 },
-      { zip: "29640", total: 2, newCount: 1, renewals: 1 },
-      { zip: "14043", total: 1, newCount: 1, renewals: 0 },
-      { zip: "20607", total: 1, newCount: 1, renewals: 0 },
-      { zip: "28732", total: 1, newCount: 1, renewals: 0 },
-      { zip: "29323", total: 1, newCount: 1, renewals: 0 },
-      { zip: "29325", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29340", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29349", total: 1, newCount: 1, renewals: 0 },
-      { zip: "29356", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29360", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29369", total: 1, newCount: 1, renewals: 0 },
-      { zip: "29602", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29627", total: 1, newCount: 1, renewals: 0 },
-      { zip: "29630", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29631", total: 1, newCount: 1, renewals: 0 },
-      { zip: "29646", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29657", total: 1, newCount: 1, renewals: 0 },
-      { zip: "29666", total: 1, newCount: 1, renewals: 0 },
-      { zip: "29670", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29690", total: 1, newCount: 0, renewals: 1 },
-      { zip: "29693", total: 1, newCount: 0, renewals: 1 },
-      { zip: "30064", total: 1, newCount: 1, renewals: 0 }
-    ];
+    // No hardcoded fallback - forces the map to load from Google Sheet or file upload
+    // This way you'll know immediately if the data source isn't working
 
     // Stadium locations
     const LOCATIONS = {
@@ -199,7 +154,7 @@
       done: 0,
       total: 0,
       binsByMetric: {},
-      dataSource: 'default'
+      dataSource: 'none'
     };
 
     // Map setup
@@ -389,8 +344,9 @@
       const div = document.getElementById('info-box');
       const metric = state.currentMetric;
       const totals = getTotals();
-      const sourceLabel = state.dataSource === 'google' ? 'Google Sheet' : 
-                          state.dataSource === 'file' ? 'Local File' : 'Default Data';
+      const sourceLabel = state.dataSource === 'google' ? '✅ Google Sheet' : 
+                          state.dataSource === 'file' ? '✅ Local File' : 
+                          state.dataSource === 'none' ? '⚠️ No data loaded' : '⚠️ No data loaded';
 
       div.innerHTML = `
         <div class="ctrl-row">
@@ -413,7 +369,7 @@
 
         <div class="tiny">
           ZIP locations: ${state.done}/${state.total} resolved<br>
-          Data source: ${sourceLabel}
+          Data source: ${sourceLabel}${zipData.length ? ` (${zipData.length} ZIPs)` : ''}
         </div>
 
         ${state.failed.length ? `<div class="errors"><b>ZIPs not found:</b><br>${state.failed.join(', ')}</div>` : ''}
@@ -430,7 +386,7 @@
             <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" onchange="loadFromFile(event)">
           </div>
 
-          <button class="btn btn-secondary" onclick="loadDefaultData()" style="margin-top: 6px;">Reset to Default</button>
+          <button class="btn btn-secondary" onclick="clearMap()" style="margin-top: 6px;">Clear Map</button>
           
           <div id="loadStatus"></div>
         </div>
@@ -649,19 +605,20 @@
       }
     };
 
-    // Load default data
-    window.loadDefaultData = function() {
-      zipData = [...DEFAULT_ZIP_DATA];
-      state.dataSource = 'default';
+    // Clear the map
+    window.clearMap = function() {
+      zipData = [];
+      state.dataSource = 'none';
+      clearMarkers();
       const statusEl = document.getElementById('loadStatus');
-      if (statusEl) statusEl.innerHTML = '<div class="success-msg">Reset to default data</div>';
-      document.getElementById('loading').classList.remove('hidden');
-      buildAllMarkers();
+      if (statusEl) statusEl.innerHTML = '<div class="tiny">Map cleared - upload new data</div>';
+      renderInfo();
+      renderLegend();
     };
 
     // Initialize
     async function init() {
-      // Try Google Sheet first if configured
+      // Try Google Sheet if configured
       if (GOOGLE_SHEET_CSV_URL) {
         try {
           const csvText = await fetchWithCorsRetry(GOOGLE_SHEET_CSV_URL);
@@ -671,16 +628,43 @@
             state.dataSource = 'google';
             await buildAllMarkers();
             return;
+          } else {
+            throw new Error('No data rows found in sheet');
           }
-        } catch (_) {
-          console.log('Google Sheet not available, using default data');
+        } catch (err) {
+          console.error('Google Sheet load failed:', err);
+          document.getElementById('loading').innerHTML = `
+            <div style="text-align: center;">
+              <div style="color: #a00; font-size: 18px; margin-bottom: 10px;">
+                ⚠️ Failed to load Google Sheet
+              </div>
+              <div style="color: #666; font-size: 14px; margin-bottom: 20px;">
+                ${err.message}
+              </div>
+              <div style="color: #333; font-size: 13px;">
+                Use the file upload in the top-left panel to load data manually.
+              </div>
+            </div>
+          `;
+          // Still render the map and controls so they can upload manually
+          renderLegend();
+          renderInfo();
         }
+      } else {
+        // No Google Sheet configured - show upload prompt
+        document.getElementById('loading').innerHTML = `
+          <div style="text-align: center;">
+            <div style="color: #0066ff; font-size: 18px; margin-bottom: 10px;">
+              No data source configured
+            </div>
+            <div style="color: #333; font-size: 13px;">
+              Use the file upload in the top-left panel, or paste a Google Sheet URL.
+            </div>
+          </div>
+        `;
+        renderLegend();
+        renderInfo();
       }
-
-      // Fall back to default data
-      zipData = [...DEFAULT_ZIP_DATA];
-      state.dataSource = 'default';
-      await buildAllMarkers();
     }
 
     init();
