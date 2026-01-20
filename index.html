@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Greenville Triumph - Season Ticket Heatmap</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; }
+    #map { width: 100vw; height: 100vh; }
+
+    .info-box {
+      background: white;
+      padding: 12px 14px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      max-width: 320px;
+    }
+    .info-title { font-weight: bold; color: #0066ff; margin-bottom: 6px; }
+
+    .legend-item { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 12px; }
+    .legend-dot { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #333; }
+
+    .stadium-marker { font-size: 32px; line-height: 32px; }
+
+    .ctrl-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    .ctrl-label { font-size: 12px; color: #333; font-weight: 700; }
+    select, input[type="text"] {
+      font-size: 12px;
+      padding: 6px 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #fff;
+      outline: none;
+    }
+    input[type="text"] { width: 100%; }
+
+    .btn {
+      font-size: 11px;
+      padding: 6px 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      background: #0066ff;
+      color: white;
+      margin-top: 6px;
+    }
+    .btn:hover { background: #0055dd; }
+    .btn-secondary { background: #666; }
+    .btn-secondary:hover { background: #555; }
+
+    .status { font-size: 12px; margin-top: 8px; color: #333; }
+    .tiny { font-size: 11px; color: #666; margin-top: 6px; line-height: 1.25; }
+
+    .errors {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #eee;
+      font-size: 11px;
+      color: #a00;
+      max-width: 280px;
+      word-break: break-word;
+    }
+
+    .data-source {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #eee;
+    }
+    .data-source-label { font-size: 11px; color: #666; margin-bottom: 4px; }
+
+    .file-input-wrapper {
+      margin-top: 6px;
+    }
+    .file-input-wrapper input[type="file"] {
+      font-size: 11px;
+      width: 100%;
+    }
+
+    .loading-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(255,255,255,0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      font-size: 18px;
+      color: #0066ff;
+    }
+    .loading-overlay.hidden { display: none; }
+
+    .success-msg { color: #080; font-size: 11px; margin-top: 4px; }
+    .error-msg { color: #a00; font-size: 11px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading-overlay">Loading map data...</div>
+  <div id="map"></div>
+
+  <script>
+    // ===========================================
+    // CONFIGURATION - EDIT THESE VALUES
+    // ===========================================
+    
+    // OPTION 1: Google Sheets URL (publish sheet as CSV)
+    // To use: In Google Sheets, go to File > Share > Publish to web > Select sheet > CSV > Publish
+    // Paste the URL here. Leave empty string to disable.
+    const GOOGLE_SHEET_CSV_URL = '';
+    
+    // OPTION 2: Default/fallback data (used when no external source is loaded)
+    // Format: { zip: "XXXXX", total: N, newCount: N, renewals: N }
+    // This data is from your ziptracking2.xlsx as of the current export
+    const DEFAULT_ZIP_DATA = [
+      { zip: "29681", total: 54, newCount: 46, renewals: 8 },
+      { zip: "29607", total: 33, newCount: 25, renewals: 8 },
+      { zip: "29680", total: 17, newCount: 13, renewals: 4 },
+      { zip: "29615", total: 17, newCount: 11, renewals: 6 },
+      { zip: "29601", total: 14, newCount: 5, renewals: 9 },
+      { zip: "29605", total: 14, newCount: 8, renewals: 6 },
+      { zip: "29609", total: 12, newCount: 6, renewals: 6 },
+      { zip: "29662", total: 12, newCount: 11, renewals: 1 },
+      { zip: "29644", total: 9, newCount: 7, renewals: 2 },
+      { zip: "29650", total: 9, newCount: 4, renewals: 5 },
+      { zip: "29651", total: 7, newCount: 4, renewals: 3 },
+      { zip: "29611", total: 5, newCount: 3, renewals: 2 },
+      { zip: "29617", total: 5, newCount: 1, renewals: 4 },
+      { zip: "29621", total: 3, newCount: 2, renewals: 1 },
+      { zip: "29642", total: 3, newCount: 0, renewals: 3 },
+      { zip: "29673", total: 3, newCount: 1, renewals: 2 },
+      { zip: "29687", total: 3, newCount: 0, renewals: 3 },
+      { zip: "29334", total: 2, newCount: 2, renewals: 0 },
+      { zip: "29365", total: 2, newCount: 1, renewals: 1 },
+      { zip: "29388", total: 2, newCount: 2, renewals: 0 },
+      { zip: "29640", total: 2, newCount: 1, renewals: 1 },
+      { zip: "14043", total: 1, newCount: 1, renewals: 0 },
+      { zip: "20607", total: 1, newCount: 1, renewals: 0 },
+      { zip: "28732", total: 1, newCount: 1, renewals: 0 },
+      { zip: "29323", total: 1, newCount: 1, renewals: 0 },
+      { zip: "29325", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29340", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29349", total: 1, newCount: 1, renewals: 0 },
+      { zip: "29356", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29360", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29369", total: 1, newCount: 1, renewals: 0 },
+      { zip: "29602", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29627", total: 1, newCount: 1, renewals: 0 },
+      { zip: "29630", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29631", total: 1, newCount: 1, renewals: 0 },
+      { zip: "29646", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29657", total: 1, newCount: 1, renewals: 0 },
+      { zip: "29666", total: 1, newCount: 1, renewals: 0 },
+      { zip: "29670", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29690", total: 1, newCount: 0, renewals: 1 },
+      { zip: "29693", total: 1, newCount: 0, renewals: 1 },
+      { zip: "30064", total: 1, newCount: 1, renewals: 0 }
+    ];
+
+    // Stadium locations
+    const LOCATIONS = {
+      stadium: {
+        name: "GE Vernova Park",
+        address: "1000 Via Corso Ave, Simpsonville, SC 29681",
+        lat: 34.7877,
+        lng: -82.2442,
+        icon: "⚽",
+        label: "Stadium"
+      },
+      furman: {
+        name: "Furman University",
+        address: "3300 Poinsett Highway, Greenville, SC 29613",
+        lat: 34.9245,
+        lng: -82.4386,
+        icon: "🟪",
+        label: "Furman"
+      }
+    };
+
+    // ===========================================
+    // END CONFIGURATION
+    // ===========================================
+
+    const METRICS = {
+      total:    { key: 'total',    label: 'Season Ticket Holders (Total)' },
+      new:      { key: 'newCount', label: 'Depositors (New)' },
+      renewals: { key: 'renewals', label: 'Depositors (Renewals)' }
+    };
+
+    // State
+    let zipData = [];
+    const state = {
+      currentMetric: 'total',
+      failed: [],
+      done: 0,
+      total: 0,
+      binsByMetric: {},
+      dataSource: 'default'
+    };
+
+    // Map setup
+    const map = L.map('map').setView([34.853, -82.398], 11);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© CartoDB © OpenStreetMap',
+      maxZoom: 19
+    }).addTo(map);
+
+    // Layer groups for each metric
+    const layers = {
+      total: L.layerGroup(),
+      new: L.layerGroup(),
+      renewals: L.layerGroup()
+    };
+    layers.total.addTo(map);
+
+    // Add stadium markers
+    function addStadiumMarkers() {
+      Object.values(LOCATIONS).forEach(loc => {
+        const icon = L.divIcon({
+          html: `<div class="stadium-marker">${loc.icon}</div>`,
+          iconSize: [40, 40],
+          className: 'stadium-icon'
+        });
+        const marker = L.marker([loc.lat, loc.lng], { icon }).addTo(map);
+        marker.bindPopup(`<b>${loc.name}</b><br>${loc.address}`);
+        marker.bindTooltip(loc.label);
+      });
+    }
+    addStadiumMarkers();
+
+    // ZIP geocoding with caching and fallback
+    const CACHE_KEY = 'zipLatLngCache_v2';
+    let coordCache = {};
+    try {
+      coordCache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+    } catch (_) {
+      coordCache = {};
+    }
+
+    function saveCache() {
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify(coordCache)); } catch (_) {}
+    }
+
+    async function getZipLatLng(zip) {
+      const cleanZip = String(zip).trim().padStart(5, '0');
+      if (coordCache[cleanZip]) return coordCache[cleanZip];
+
+      // Primary: Zippopotam.us
+      try {
+        const res = await fetch(`https://api.zippopotam.us/us/${cleanZip}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.places && data.places.length) {
+            const p = data.places[0];
+            const lat = parseFloat(p.latitude);
+            const lng = parseFloat(p.longitude);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+              coordCache[cleanZip] = { lat, lng };
+              saveCache();
+              return coordCache[cleanZip];
+            }
+          }
+        }
+      } catch (_) {}
+
+      // Fallback: Nominatim (OpenStreetMap)
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?postalcode=${cleanZip}&country=US&format=json&limit=1`,
+          { headers: { 'User-Agent': 'GreenvilleTriumphHeatmap/1.0' } }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.length) {
+            const lat = parseFloat(data[0].lat);
+            const lng = parseFloat(data[0].lon);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+              coordCache[cleanZip] = { lat, lng };
+              saveCache();
+              return coordCache[cleanZip];
+            }
+          }
+        }
+      } catch (_) {}
+
+      throw new Error(`Could not geocode ZIP: ${cleanZip}`);
+    }
+
+    // Dynamic binning
+    function makeBins(maxVal) {
+      if (maxVal >= 50) return [50, 30, 15, 10, 1];
+      if (maxVal >= 30) return [30, 20, 10, 5, 1];
+      if (maxVal >= 15) return [15, 10, 5, 3, 1];
+      if (maxVal >= 10) return [10, 7, 4, 2, 1];
+      const b0 = maxVal;
+      const b1 = Math.max(1, Math.ceil(maxVal * 0.75));
+      const b2 = Math.max(1, Math.ceil(maxVal * 0.50));
+      const b3 = Math.max(1, Math.ceil(maxVal * 0.25));
+      return [b0, b1, b2, b3, 1];
+    }
+
+    function computeBins() {
+      Object.entries(METRICS).forEach(([metricName, meta]) => {
+        const vals = zipData.map(z => Number(z[meta.key]) || 0).filter(v => v > 0);
+        const maxVal = vals.length ? Math.max(...vals) : 1;
+        state.binsByMetric[metricName] = makeBins(maxVal);
+      });
+    }
+
+    function getColor(val, bins) {
+      if (val >= bins[0]) return '#0000ff';
+      if (val >= bins[1]) return '#0033ff';
+      if (val >= bins[2]) return '#0066ff';
+      if (val >= bins[3]) return '#3399ff';
+      return '#66ccff';
+    }
+
+    function getRadius(val, bins) {
+      if (val >= bins[0]) return 28;
+      if (val >= bins[1]) return 22;
+      if (val >= bins[2]) return 18;
+      if (val >= bins[3]) return 14;
+      return 11;
+    }
+
+    function makeLegendLabels(bins) {
+      return [
+        `${bins[0]}+`,
+        `${bins[1]}-${Math.max(bins[1], bins[0] - 1)}`,
+        `${bins[2]}-${Math.max(bins[2], bins[1] - 1)}`,
+        `${bins[3]}-${Math.max(bins[3], bins[2] - 1)}`,
+        `${bins[4]}-${Math.max(bins[4], bins[3] - 1)}`
+      ];
+    }
+
+    // Legend
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create('div', 'info-box');
+      div.id = 'legend-box';
+      return div;
+    };
+    legend.addTo(map);
+
+    function renderLegend() {
+      const div = document.getElementById('legend-box');
+      const metric = state.currentMetric;
+      const bins = state.binsByMetric[metric] || [50, 30, 15, 10, 1];
+      const labels = makeLegendLabels(bins);
+
+      div.innerHTML = `
+        <div class="info-title">${METRICS[metric].label}</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#0000ff"></div>${labels[0]}</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#0033ff"></div>${labels[1]}</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#0066ff"></div>${labels[2]}</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#3399ff"></div>${labels[3]}</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#66ccff"></div>${labels[4]}</div>
+        <div style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 8px;">
+          <div class="legend-item"><span style="font-size: 24px;">⚽</span> Stadium</div>
+          <div class="legend-item"><span style="font-size: 24px;">🟪</span> Furman</div>
+        </div>
+      `;
+    }
+
+    // Info panel
+    const info = L.control({ position: 'topleft' });
+    info.onAdd = () => {
+      const div = L.DomUtil.create('div', 'info-box');
+      div.id = 'info-box';
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.disableScrollPropagation(div);
+      return div;
+    };
+    info.addTo(map);
+
+    function getTotals() {
+      return {
+        total: zipData.reduce((s, z) => s + (Number(z.total) || 0), 0),
+        newCount: zipData.reduce((s, z) => s + (Number(z.newCount) || 0), 0),
+        renewals: zipData.reduce((s, z) => s + (Number(z.renewals) || 0), 0)
+      };
+    }
+
+    function renderInfo() {
+      const div = document.getElementById('info-box');
+      const metric = state.currentMetric;
+      const totals = getTotals();
+      const sourceLabel = state.dataSource === 'google' ? 'Google Sheet' : 
+                          state.dataSource === 'file' ? 'Local File' : 'Default Data';
+
+      div.innerHTML = `
+        <div class="ctrl-row">
+          <div class="info-title">Greenville Triumph SC</div>
+          <div>
+            <span class="ctrl-label">View</span>
+            <select id="metricSelect">
+              <option value="total" ${metric === 'total' ? 'selected' : ''}>Total</option>
+              <option value="new" ${metric === 'new' ? 'selected' : ''}>New</option>
+              <option value="renewals" ${metric === 'renewals' ? 'selected' : ''}>Renewals</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="status">
+          <strong>Total:</strong> ${totals.total}<br>
+          <strong>New:</strong> ${totals.newCount}<br>
+          <strong>Renewals:</strong> ${totals.renewals}
+        </div>
+
+        <div class="tiny">
+          ZIP locations: ${state.done}/${state.total} resolved<br>
+          Data source: ${sourceLabel}
+        </div>
+
+        ${state.failed.length ? `<div class="errors"><b>ZIPs not found:</b><br>${state.failed.join(', ')}</div>` : ''}
+
+        <div class="data-source">
+          <div class="data-source-label"><strong>Load Data:</strong></div>
+          
+          <div style="margin-top: 6px;">
+            <input type="text" id="sheetUrl" placeholder="Google Sheet CSV URL..." style="font-size: 11px;">
+            <button class="btn" onclick="loadFromGoogleSheet()" style="margin-top: 4px;">Load from Google Sheet</button>
+          </div>
+
+          <div class="file-input-wrapper">
+            <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" onchange="loadFromFile(event)">
+          </div>
+
+          <button class="btn btn-secondary" onclick="loadDefaultData()" style="margin-top: 6px;">Reset to Default</button>
+          
+          <div id="loadStatus"></div>
+        </div>
+      `;
+
+      document.getElementById('metricSelect').onchange = (e) => setMetric(e.target.value);
+      
+      // Pre-fill Google Sheet URL if configured
+      if (GOOGLE_SHEET_CSV_URL) {
+        document.getElementById('sheetUrl').value = GOOGLE_SHEET_CSV_URL;
+      }
+    }
+
+    function setMetric(metric) {
+      if (!METRICS[metric]) return;
+      Object.values(layers).forEach(lg => map.removeLayer(lg));
+      map.addLayer(layers[metric]);
+      state.currentMetric = metric;
+      renderLegend();
+      renderInfo();
+    }
+
+    // Marker creation
+    function addZipMarkers(item, lat, lng) {
+      Object.entries(METRICS).forEach(([metricName, meta]) => {
+        const val = Number(item[meta.key]) || 0;
+        if (val <= 0) return;
+
+        const bins = state.binsByMetric[metricName];
+        const marker = L.circleMarker([lat, lng], {
+          radius: getRadius(val, bins),
+          fillColor: getColor(val, bins),
+          color: '#fff',
+          weight: 2.5,
+          opacity: 1,
+          fillOpacity: 0.9
+        });
+
+        marker.bindPopup(
+          `<b style="color:#0066ff">ZIP ${item.zip}</b><br>` +
+          `Total: ${item.total}<br>` +
+          `New: ${item.newCount}<br>` +
+          `Renewals: ${item.renewals}`
+        );
+        marker.bindTooltip(String(item.zip));
+        marker.addTo(layers[metricName]);
+      });
+    }
+
+    // Concurrency limiter
+    async function runPool(tasks, concurrency) {
+      let i = 0;
+      const workers = Array(concurrency).fill(0).map(async () => {
+        while (i < tasks.length) {
+          const idx = i++;
+          await tasks[idx]();
+        }
+      });
+      await Promise.all(workers);
+    }
+
+    // Clear and rebuild markers
+    function clearMarkers() {
+      Object.values(layers).forEach(lg => lg.clearLayers());
+      state.failed = [];
+      state.done = 0;
+    }
+
+    async function buildAllMarkers() {
+      clearMarkers();
+      state.total = zipData.length;
+      computeBins();
+      renderLegend();
+      renderInfo();
+
+      const tasks = zipData.map((item) => async () => {
+        try {
+          const { lat, lng } = await getZipLatLng(item.zip);
+          addZipMarkers(item, lat, lng);
+        } catch (err) {
+          state.failed.push(item.zip);
+        } finally {
+          state.done++;
+          renderInfo();
+        }
+      });
+
+      await runPool(tasks, 6);
+      renderInfo();
+      document.getElementById('loading').classList.add('hidden');
+    }
+
+    // Data parsing and normalization
+    function normalizeData(rawData) {
+      // Aggregate by ZIP in case of duplicates
+      const zipMap = new Map();
+      
+      rawData.forEach(row => {
+        // Handle various column name formats
+        const zip = String(row.zip || row.ZIP || row.Zip || row['Zip Code'] || row['zip code'] || '').trim().padStart(5, '0');
+        if (!zip || zip === '00000' || zip.length !== 5) return;
+
+        const newCount = Number(row.newCount || row.New || row.new || row['New'] || 0);
+        const renewals = Number(row.renewals || row.Renewal || row.renewal || row.Renewals || row['Renewal'] || 0);
+        const total = Number(row.total || row.Total || row['Total'] || newCount + renewals);
+
+        if (zipMap.has(zip)) {
+          const existing = zipMap.get(zip);
+          existing.newCount += newCount;
+          existing.renewals += renewals;
+          existing.total += total;
+        } else {
+          zipMap.set(zip, { zip, total, newCount, renewals });
+        }
+      });
+
+      return Array.from(zipMap.values()).filter(z => z.total > 0);
+    }
+
+    // Load from Google Sheet
+    window.loadFromGoogleSheet = async function() {
+      const url = document.getElementById('sheetUrl').value.trim();
+      const statusEl = document.getElementById('loadStatus');
+      
+      if (!url) {
+        statusEl.innerHTML = '<div class="error-msg">Please enter a Google Sheet CSV URL</div>';
+        return;
+      }
+
+      statusEl.innerHTML = '<div class="tiny">Loading from Google Sheet...</div>';
+      document.getElementById('loading').classList.remove('hidden');
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const csvText = await response.text();
+        
+        Papa.parse(csvText, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            if (results.data.length === 0) {
+              statusEl.innerHTML = '<div class="error-msg">No data found in sheet</div>';
+              document.getElementById('loading').classList.add('hidden');
+              return;
+            }
+            
+            zipData = normalizeData(results.data);
+            state.dataSource = 'google';
+            statusEl.innerHTML = `<div class="success-msg">Loaded ${zipData.length} ZIP codes</div>`;
+            buildAllMarkers();
+          },
+          error: (err) => {
+            statusEl.innerHTML = `<div class="error-msg">Parse error: ${err.message}</div>`;
+            document.getElementById('loading').classList.add('hidden');
+          }
+        });
+      } catch (err) {
+        statusEl.innerHTML = `<div class="error-msg">Failed to load: ${err.message}</div>`;
+        document.getElementById('loading').classList.add('hidden');
+      }
+    };
+
+    // Load from local file
+    window.loadFromFile = function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const statusEl = document.getElementById('loadStatus');
+      statusEl.innerHTML = '<div class="tiny">Loading file...</div>';
+      document.getElementById('loading').classList.remove('hidden');
+
+      const reader = new FileReader();
+      
+      if (file.name.endsWith('.csv')) {
+        reader.onload = (e) => {
+          Papa.parse(e.target.result, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+              zipData = normalizeData(results.data);
+              state.dataSource = 'file';
+              statusEl.innerHTML = `<div class="success-msg">Loaded ${zipData.length} ZIP codes from ${file.name}</div>`;
+              buildAllMarkers();
+            }
+          });
+        };
+        reader.readAsText(file);
+      } else {
+        // For Excel files, we need to use a library or convert to CSV first
+        statusEl.innerHTML = '<div class="error-msg">For Excel files, please save as CSV first, or use Google Sheets</div>';
+        document.getElementById('loading').classList.add('hidden');
+      }
+    };
+
+    // Load default data
+    window.loadDefaultData = function() {
+      zipData = [...DEFAULT_ZIP_DATA];
+      state.dataSource = 'default';
+      const statusEl = document.getElementById('loadStatus');
+      if (statusEl) statusEl.innerHTML = '<div class="success-msg">Reset to default data</div>';
+      document.getElementById('loading').classList.remove('hidden');
+      buildAllMarkers();
+    };
+
+    // Initialize
+    async function init() {
+      // Try Google Sheet first if configured
+      if (GOOGLE_SHEET_CSV_URL) {
+        try {
+          const response = await fetch(GOOGLE_SHEET_CSV_URL);
+          if (response.ok) {
+            const csvText = await response.text();
+            const results = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+            if (results.data.length > 0) {
+              zipData = normalizeData(results.data);
+              state.dataSource = 'google';
+              await buildAllMarkers();
+              return;
+            }
+          }
+        } catch (_) {
+          console.log('Google Sheet not available, using default data');
+        }
+      }
+
+      // Fall back to default data
+      zipData = [...DEFAULT_ZIP_DATA];
+      state.dataSource = 'default';
+      await buildAllMarkers();
+    }
+
+    init();
+  </script>
+</body>
+</html>
